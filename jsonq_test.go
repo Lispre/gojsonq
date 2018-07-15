@@ -24,6 +24,17 @@ func TestJSONQ_String(t *testing.T) {
 	}
 }
 
+func TestJSONQ_log(t *testing.T) {
+	expected := "gojsonq: hello log"
+	out := catchStdOut(func() {
+		jq := New(SetDebug(true))
+		jq.log("hello log")
+	})
+	if !strings.Contains(out, expected) {
+		t.Errorf("failed to set log")
+	}
+}
+
 func TestJSONQ_decode(t *testing.T) {
 	testCases := []struct {
 		tag       string
@@ -1119,6 +1130,13 @@ func Benchmark_From_Where_Select_Get(b *testing.B) {
 	jq := New().JSONString(jsonStr)
 	for n := 0; n < b.N; n++ {
 		jq.From("vendor.items").Where("id", "=", 1).Select("id", "name").Get()
+	}
+}
+
+func Benchmark_From_Where_Only(b *testing.B) {
+	jq := New().JSONString(jsonStr)
+	for n := 0; n < b.N; n++ {
+		jq.From("vendor.items").Only("id", "name")
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"strings"
 )
 
 // New returns a new instance of JSONQ
@@ -13,14 +14,17 @@ func New(options ...OptionFunc) *JSONQ {
 	jq := &JSONQ{
 		queryMap: loadDefaultQueryMap(),
 		option: option{
+			logger:  &DefaultLogger{},
 			decoder: &DefaultDecoder{},
 		},
 	}
+
 	for _, option := range options {
 		if err := option(jq); err != nil {
 			jq.addError(err)
 		}
 	}
+	jq.log("Build options complete")
 	return jq
 }
 
@@ -53,12 +57,22 @@ func (j *JSONQ) String() string {
 	return fmt.Sprintf("\nContent: %s\nQueries:%v\n", string(j.raw), j.queries)
 }
 
+// log handle debug and error logs
+func (j *JSONQ) log(str string) *JSONQ {
+	if j.option.debug {
+		j.option.logger.Printf("gojsonq: %s\n", str)
+	}
+	return j
+}
+
 // decode decodes the raw message to Go data structure
 func (j *JSONQ) decode() *JSONQ {
+	j.log("Decode json")
 	if err := j.option.decoder.
 		Decode(j.raw, &j.rootJSONContent); err != nil {
 		return j.addError(err)
 	}
+	j.log("Decode josn complete")
 	j.jsonContent = j.rootJSONContent
 	return j
 }
@@ -66,33 +80,41 @@ func (j *JSONQ) decode() *JSONQ {
 // Copy returns a new fresh instance of JSONQ with the original copy of data so that you can do
 // concurrent operation on the same data without being decoded again
 func (j *JSONQ) Copy() *JSONQ {
+	j.log("Copy JSONQ instance")
 	tmp := *j
+	j.log("Copy JSONQ instance complete")
 	return tmp.reset()
 }
 
 // File read the json content from physical file
 func (j *JSONQ) File(filename string) *JSONQ {
+	j.log(fmt.Sprintf("Read file [%s]", filename))
 	bb, err := ioutil.ReadFile(filename)
 	if err != nil {
 		return j.addError(err)
 	}
+	j.log(fmt.Sprintf("Read file [%s] complete", filename))
 	j.raw = bb
 	return j.decode() // handle error
 }
 
 // JSONString reads the json content from valid json string
 func (j *JSONQ) JSONString(json string) *JSONQ {
+	j.log("Read from string")
 	j.raw = []byte(json)
+	j.log("Read from string complete")
 	return j.decode() // handle error
 }
 
 // Reader reads the json content from io reader
 func (j *JSONQ) Reader(r io.Reader) *JSONQ {
+	j.log("Read from io.Reader")
 	buf := new(bytes.Buffer)
 	_, err := buf.ReadFrom(r)
 	if err != nil {
 		return j.addError(err)
 	}
+	j.log("Read from io.Reader complete")
 	j.raw = buf.Bytes()
 	buf.Reset() // reset the buffer
 	return j.decode()
@@ -114,26 +136,31 @@ func (j *JSONQ) Errors() []error {
 
 // addError adds error to error list
 func (j *JSONQ) addError(err error) *JSONQ {
-	j.errors = append(j.errors, fmt.Errorf("gojsonq: %v", err))
+	j.errors = append(j.errors, fmt.Errorf("gojsonq: %s", err.Error()))
 	return j
 }
 
 // Macro adds a new query func to the JSONQ
 func (j *JSONQ) Macro(operator string, fn QueryFunc) *JSONQ {
+	j.log(fmt.Sprintf("Register macro [%s]", operator))
 	if _, ok := j.queryMap[operator]; ok {
 		j.addError(fmt.Errorf("%s is already registered in query map", operator))
 		return j
 	}
+	j.log(fmt.Sprintf("Register macro [%s] complete", operator))
 	j.queryMap[operator] = fn
 	return j
 }
 
 // From seeks the json content to provided node. e.g: "users.[0]"  or "users.[0].name"
 func (j *JSONQ) From(node string) *JSONQ {
+	j.log(fmt.Sprintf("Switch to node [%s]", node))
 	j.node = node
 	v, err := getNestedValue(j.jsonContent, node)
 	if err != nil {
 		j.addError(err)
+	} else {
+		j.log(fmt.Sprintf("Switch to node [%s] complete", node))
 	}
 	j.jsonContent = v
 	return j
@@ -158,6 +185,7 @@ func (j *JSONQ) limit() *JSONQ {
 			j.addError(fmt.Errorf("%d is invalid limit", j.limitRecords))
 			return j
 		}
+		j.log(fmt.Sprintf("Result limit to [%d]", j.limitRecords))
 		if len(list) > j.limitRecords {
 			j.jsonContent = list[:j.limitRecords]
 		}
@@ -167,6 +195,7 @@ func (j *JSONQ) limit() *JSONQ {
 
 // Where builds a where clause. e.g: Where("name", "contains", "doe")
 func (j *JSONQ) Where(key, cond string, val interface{}) *JSONQ {
+	j.log(fmt.Sprintf("Where: [%s %s %v]", key, cond, val))
 	q := query{
 		key:      key,
 		operator: cond,
@@ -217,6 +246,7 @@ func (j *JSONQ) WhereNotIn(key string, val interface{}) *JSONQ {
 
 // OrWhere builds an OrWhere clause, basically it's a group of AND clauses
 func (j *JSONQ) OrWhere(key, cond string, val interface{}) *JSONQ {
+	j.log(fmt.Sprintf("OrWhere: [%s %s %v]", key, cond, val))
 	j.queryIndex++
 	qq := []query{}
 	qq = append(qq, query{
@@ -305,7 +335,9 @@ func (j *JSONQ) processQuery() *JSONQ {
 // prepare builds the queries
 func (j *JSONQ) prepare() *JSONQ {
 	if len(j.queries) > 0 {
+		j.log("Process Where/OrWhere queries")
 		j.processQuery()
+		j.log("Process Where/OrWhere queries complete")
 	}
 	j.queryIndex = 0
 	return j
@@ -314,7 +346,7 @@ func (j *JSONQ) prepare() *JSONQ {
 // GroupBy builds a chunk of exact matched data in a group list using provided attribute/column/property
 func (j *JSONQ) GroupBy(property string) *JSONQ {
 	j.prepare()
-
+	j.log(fmt.Sprintf("GroupBy [%s]", property))
 	dt := map[string][]interface{}{}
 	if aa, ok := j.jsonContent.([]interface{}); ok {
 		for _, a := range aa {
@@ -328,6 +360,7 @@ func (j *JSONQ) GroupBy(property string) *JSONQ {
 			}
 		}
 	}
+	j.log(fmt.Sprintf("GroupBy [%s] complete", property))
 	// replace the new result with the previous result
 	j.jsonContent = dt
 	return j
@@ -345,9 +378,11 @@ func (j *JSONQ) Sort(order ...string) *JSONQ {
 	if len(order) > 0 && order[0] == "desc" {
 		asc = false
 	}
+	j.log("Sort list")
 	if arr, ok := j.jsonContent.([]interface{}); ok {
 		j.jsonContent = sortList(arr, asc)
 	}
+	j.log("Sort list complete")
 	return j
 }
 
@@ -372,6 +407,7 @@ func (j *JSONQ) SortBy(order ...string) *JSONQ {
 
 // sortBy sorts list of map
 func (j *JSONQ) sortBy(property string, asc bool) *JSONQ {
+	j.log(fmt.Sprintf("SortBy [%s]", property))
 	sortResult, ok := j.jsonContent.([]interface{})
 	if !ok {
 		return j
@@ -390,7 +426,7 @@ func (j *JSONQ) sortBy(property string, asc bool) *JSONQ {
 	for _, e := range sm.errs {
 		j.addError(e)
 	}
-
+	j.log(fmt.Sprintf("SortBy [%s] complete", property))
 	// replace the new result with the previous result
 	j.jsonContent = sortResult
 	return j
@@ -399,6 +435,8 @@ func (j *JSONQ) sortBy(property string, asc bool) *JSONQ {
 // only return selected properties in result
 func (j *JSONQ) only(properties ...string) interface{} {
 	result := []interface{}{}
+	prpstr := strings.Join(properties, ",")
+	j.log(fmt.Sprintf("Select properties: %s", prpstr))
 	if aa, ok := j.jsonContent.([]interface{}); ok {
 		for _, am := range aa {
 			tmap := map[string]interface{}{}
@@ -416,6 +454,7 @@ func (j *JSONQ) only(properties ...string) interface{} {
 			}
 		}
 	}
+	j.log(fmt.Sprintf("Select properties: %s complete", prpstr))
 	return result
 }
 
@@ -427,6 +466,7 @@ func (j *JSONQ) Only(properties ...string) interface{} {
 // Pluck build an array of vlaues form a property of a list of objects
 func (j *JSONQ) Pluck(property string) interface{} {
 	j.prepare()
+	j.log(fmt.Sprintf("Pluck [%s]", property))
 	result := []interface{}{}
 	if aa, ok := j.jsonContent.([]interface{}); ok {
 		for _, am := range aa {
@@ -437,17 +477,20 @@ func (j *JSONQ) Pluck(property string) interface{} {
 			}
 		}
 	}
+	j.log(fmt.Sprintf("Pluck [%s] complete", property))
 	return result
 }
 
 // reset resets the current state of JSONQ instance
 func (j *JSONQ) reset() *JSONQ {
+	j.log("Reset JSONQ instance")
 	j.jsonContent = j.rootJSONContent
 	j.node = ""
 	j.queries = make([][]query, 0)
 	j.attributes = make([]string, 0)
 	j.queryIndex = 0
 	j.limitRecords = 0
+	j.log("Reset JSONQ instance complete")
 	return j
 }
 
@@ -471,6 +514,7 @@ func (j *JSONQ) Get() interface{} {
 // First returns the first element of a list
 func (j *JSONQ) First() interface{} {
 	res := j.prepare().jsonContent
+	j.log("Fetch first item")
 	if arr, ok := res.([]interface{}); ok {
 		if len(arr) > 0 {
 			return arr[0]
@@ -482,6 +526,7 @@ func (j *JSONQ) First() interface{} {
 // Last returns the last element of a list
 func (j *JSONQ) Last() interface{} {
 	res := j.prepare().jsonContent
+	j.log("Fetch last item")
 	if arr, ok := res.([]interface{}); ok {
 		if l := len(arr); l > 0 {
 			return arr[l-1]
@@ -525,6 +570,7 @@ func (j *JSONQ) Find(path string) interface{} {
 // This could be a length of list/array/map
 func (j *JSONQ) Count() int {
 	j.prepare()
+	j.log("Calculate count")
 	lnth := 0
 	// list of items
 	if list, ok := j.jsonContent.([]interface{}); ok {
@@ -538,7 +584,7 @@ func (j *JSONQ) Count() int {
 	if m, ok := j.jsonContent.(map[string][]interface{}); ok {
 		lnth = len(m)
 	}
-
+	j.log("Calculate count complete")
 	return lnth
 }
 
@@ -607,48 +653,58 @@ func (j *JSONQ) getAggregationValues(property ...string) []float64 {
 // Sum returns sum of values from array or from map using property
 func (j *JSONQ) Sum(property ...string) float64 {
 	var sum float64
-	for _, flt := range j.getAggregationValues(property...) {
+	ff := j.getAggregationValues(property...)
+	j.log("Calculate sum")
+	for _, flt := range ff {
 		sum += flt
 	}
+	j.log("Calculate sum complete")
 	return sum
 }
 
 // Avg returns average of values from array or from map using property
 func (j *JSONQ) Avg(property ...string) float64 {
 	var sum float64
-	fl := j.getAggregationValues(property...)
-	for _, flt := range fl {
+	ff := j.getAggregationValues(property...)
+	j.log("Calculate avg")
+	for _, flt := range ff {
 		sum += flt
 	}
-	return sum / float64(len(fl))
+	avg := sum / float64(len(ff))
+	j.log("Calculate avg complete")
+	return avg
 }
 
 // Min returns minimum value from array or from map using property
 func (j *JSONQ) Min(property ...string) float64 {
 	var min float64
-	flist := j.getAggregationValues(property...)
-	if len(flist) > 0 {
-		min = flist[0]
+	ff := j.getAggregationValues(property...)
+	j.log("Calculate min")
+	if len(ff) > 0 {
+		min = ff[0]
 	}
-	for _, flt := range flist {
+	for _, flt := range ff {
 		if flt < min {
 			min = flt
 		}
 	}
+	j.log("Calculate min complete")
 	return min
 }
 
 // Max returns maximum value from array or from map using property
 func (j *JSONQ) Max(property ...string) float64 {
 	var max float64
-	flist := j.getAggregationValues(property...)
-	if len(flist) > 0 {
-		max = flist[0]
+	ff := j.getAggregationValues(property...)
+	j.log("Calculate max")
+	if len(ff) > 0 {
+		max = ff[0]
 	}
-	for _, flt := range flist {
+	for _, flt := range ff {
 		if flt > max {
 			max = flt
 		}
 	}
+	j.log("Calculate max complete")
 	return max
 }

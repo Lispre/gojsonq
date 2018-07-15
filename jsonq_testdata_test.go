@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"io/ioutil"
+	"log"
 	"os"
 	"testing"
 )
@@ -161,4 +162,20 @@ type cDecoder struct {
 
 func (c *cDecoder) Decode(data []byte, v interface{}) error {
 	return json.Unmarshal(data, &v) // let's assume this is a custom unmarshaler
+}
+
+func catchStdOut(fn func()) string {
+	var buf bytes.Buffer
+	log.SetOutput(&buf)
+	fn()
+	log.SetOutput(os.Stdout)
+	return buf.String()
+}
+
+type cLogger struct {
+}
+
+func (*cLogger) Printf(format string, v ...interface{}) {
+	log.SetPrefix("custom logger:")
+	log.Printf(format, v...)
 }
