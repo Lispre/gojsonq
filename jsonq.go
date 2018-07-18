@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
-	"strings"
 )
 
 // New returns a new instance of JSONQ
@@ -58,9 +57,9 @@ func (j *JSONQ) String() string {
 }
 
 // log handle debug and error logs
-func (j *JSONQ) log(str string) *JSONQ {
+func (j *JSONQ) log(format string, v ...interface{}) *JSONQ {
 	if j.option.debug {
-		j.option.logger.Printf("gojsonq: %s\n", str)
+		j.option.logger.Printf("gojsonq: "+format, v...)
 	}
 	return j
 }
@@ -88,12 +87,12 @@ func (j *JSONQ) Copy() *JSONQ {
 
 // File read the json content from physical file
 func (j *JSONQ) File(filename string) *JSONQ {
-	j.log(fmt.Sprintf("Read file [%s]", filename))
+	j.log("Read file [%s]", filename)
 	bb, err := ioutil.ReadFile(filename)
 	if err != nil {
 		return j.addError(err)
 	}
-	j.log(fmt.Sprintf("Read file [%s] complete", filename))
+	j.log("Read file [%s] complete", filename)
 	j.raw = bb
 	return j.decode() // handle error
 }
@@ -142,25 +141,25 @@ func (j *JSONQ) addError(err error) *JSONQ {
 
 // Macro adds a new query func to the JSONQ
 func (j *JSONQ) Macro(operator string, fn QueryFunc) *JSONQ {
-	j.log(fmt.Sprintf("Register macro [%s]", operator))
+	j.log("Register macro [%s]", operator)
 	if _, ok := j.queryMap[operator]; ok {
 		j.addError(fmt.Errorf("%s is already registered in query map", operator))
 		return j
 	}
-	j.log(fmt.Sprintf("Register macro [%s] complete", operator))
+	j.log("Register macro [%s] complete", operator)
 	j.queryMap[operator] = fn
 	return j
 }
 
 // From seeks the json content to provided node. e.g: "users.[0]"  or "users.[0].name"
 func (j *JSONQ) From(node string) *JSONQ {
-	j.log(fmt.Sprintf("Switch to node [%s]", node))
+	j.log("Switch to node [%s]", node)
 	j.node = node
 	v, err := getNestedValue(j.jsonContent, node)
 	if err != nil {
 		j.addError(err)
 	} else {
-		j.log(fmt.Sprintf("Switch to node [%s] complete", node))
+		j.log("Switch to node [%s] complete", node)
 	}
 	j.jsonContent = v
 	return j
@@ -185,7 +184,7 @@ func (j *JSONQ) limit() *JSONQ {
 			j.addError(fmt.Errorf("%d is invalid limit", j.limitRecords))
 			return j
 		}
-		j.log(fmt.Sprintf("Result limit to [%d]", j.limitRecords))
+		j.log("Result limit to [%d]", j.limitRecords)
 		if len(list) > j.limitRecords {
 			j.jsonContent = list[:j.limitRecords]
 		}
@@ -195,7 +194,7 @@ func (j *JSONQ) limit() *JSONQ {
 
 // Where builds a where clause. e.g: Where("name", "contains", "doe")
 func (j *JSONQ) Where(key, cond string, val interface{}) *JSONQ {
-	j.log(fmt.Sprintf("Where: [%s %s %v]", key, cond, val))
+	j.log("Where: [%s %s %v]", key, cond, val)
 	q := query{
 		key:      key,
 		operator: cond,
@@ -246,7 +245,7 @@ func (j *JSONQ) WhereNotIn(key string, val interface{}) *JSONQ {
 
 // OrWhere builds an OrWhere clause, basically it's a group of AND clauses
 func (j *JSONQ) OrWhere(key, cond string, val interface{}) *JSONQ {
-	j.log(fmt.Sprintf("OrWhere: [%s %s %v]", key, cond, val))
+	j.log("OrWhere: [%s %s %v]", key, cond, val)
 	j.queryIndex++
 	qq := []query{}
 	qq = append(qq, query{
@@ -346,7 +345,7 @@ func (j *JSONQ) prepare() *JSONQ {
 // GroupBy builds a chunk of exact matched data in a group list using provided attribute/column/property
 func (j *JSONQ) GroupBy(property string) *JSONQ {
 	j.prepare()
-	j.log(fmt.Sprintf("GroupBy [%s]", property))
+	j.log("GroupBy [%s]", property)
 	dt := map[string][]interface{}{}
 	if aa, ok := j.jsonContent.([]interface{}); ok {
 		for _, a := range aa {
@@ -360,7 +359,7 @@ func (j *JSONQ) GroupBy(property string) *JSONQ {
 			}
 		}
 	}
-	j.log(fmt.Sprintf("GroupBy [%s] complete", property))
+	j.log("GroupBy [%s] complete", property)
 	// replace the new result with the previous result
 	j.jsonContent = dt
 	return j
@@ -407,7 +406,7 @@ func (j *JSONQ) SortBy(order ...string) *JSONQ {
 
 // sortBy sorts list of map
 func (j *JSONQ) sortBy(property string, asc bool) *JSONQ {
-	j.log(fmt.Sprintf("SortBy [%s]", property))
+	j.log("SortBy [%s]", property)
 	sortResult, ok := j.jsonContent.([]interface{})
 	if !ok {
 		return j
@@ -426,7 +425,7 @@ func (j *JSONQ) sortBy(property string, asc bool) *JSONQ {
 	for _, e := range sm.errs {
 		j.addError(e)
 	}
-	j.log(fmt.Sprintf("SortBy [%s] complete", property))
+	j.log("SortBy [%s] complete", property)
 	// replace the new result with the previous result
 	j.jsonContent = sortResult
 	return j
@@ -435,8 +434,7 @@ func (j *JSONQ) sortBy(property string, asc bool) *JSONQ {
 // only return selected properties in result
 func (j *JSONQ) only(properties ...string) interface{} {
 	result := []interface{}{}
-	prpstr := strings.Join(properties, ",")
-	j.log(fmt.Sprintf("Select properties: %s", prpstr))
+	j.log("Select properties: %v", properties)
 	if aa, ok := j.jsonContent.([]interface{}); ok {
 		for _, am := range aa {
 			tmap := map[string]interface{}{}
@@ -454,7 +452,7 @@ func (j *JSONQ) only(properties ...string) interface{} {
 			}
 		}
 	}
-	j.log(fmt.Sprintf("Select properties: %s complete", prpstr))
+	j.log("Select properties: %v complete", properties)
 	return result
 }
 
@@ -466,7 +464,7 @@ func (j *JSONQ) Only(properties ...string) interface{} {
 // Pluck build an array of vlaues form a property of a list of objects
 func (j *JSONQ) Pluck(property string) interface{} {
 	j.prepare()
-	j.log(fmt.Sprintf("Pluck [%s]", property))
+	j.log("Pluck [%s]", property)
 	result := []interface{}{}
 	if aa, ok := j.jsonContent.([]interface{}); ok {
 		for _, am := range aa {
@@ -477,7 +475,7 @@ func (j *JSONQ) Pluck(property string) interface{} {
 			}
 		}
 	}
-	j.log(fmt.Sprintf("Pluck [%s] complete", property))
+	j.log("Pluck [%s] complete", property)
 	return result
 }
 
